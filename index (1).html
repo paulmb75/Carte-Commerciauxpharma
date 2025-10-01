@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carte interactive – CA & Commerciaux</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    html, body { height: 100%; margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    header { padding: 12px 16px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #eee; flex-wrap: wrap; }
+    header .title { font-weight: 700; }
+    header .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    select, input[type="text"] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 10px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #f0f0f0; font-size: 12px; }
+    #map { height: 100%; width: 100%; }
+    .legend { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,.08); line-height: 1.2; }
+    .info { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,.08); }
+    .tooltip h4 { margin: 0 0 6px 0; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="title">📍 Carte France – CA & Commerciaux</div>
+      <div class="controls">
+        <label>Mode couleur
+          <select id="colorMode">
+            <option value="ca" selected>CA (€)</option>
+            <option value="coverage">Commercial</option>
+          </select>
+        </label>
+        <label>Commercial
+          <select id="repFilter">
+            <option value="ALL">Tous</option>
+          </select>
+        </label>
+        <input id="search" type="text" placeholder="Rechercher un département… (nom ou code)" />
+      </div>
+    </header>
+    <div id="map"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <script>
+    const DATA = {"13": {"pharmacies": 745, "ca": 2063658.0, "commercial": "Bernadette Boiron, Laure Bonnel, Laurent Botti, Nathalie Bouchard, S. Gambirasio, Val Barnes, Vincent Guinet"}, "83": {"pharmacies": 372, "ca": 1403294.0, "commercial": "Geraldine Seliga, Laurent Botti, Nathalie Bouchard, S. Gambirasio"}, "06": {"pharmacies": 439, "ca": 695500.0, "commercial": "Geraldine Seliga"}};
+
+    const GEOJSON_URL = "https://france-geojson.gregoiredavid.fr/repo/departements.geojson";
+
+    const map = L.map('map', { minZoom: 5, maxZoom: 10 }).setView([46.6, 2.5], 6);
+    map.setMaxBounds([[41, -5], [51.5, 10]]);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
+      attribution: '&copy; contributeurs <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
+    }).addTo(map);
+
+    const infoCtrl = L.control({position: 'topright'});
+    infoCtrl.onAdd = function () { this._div = L.DomUtil.create('div', 'info'); this.update(); return this._div; };
+    infoCtrl.update = function (props) {
+      this._div.innerHTML = props ? `
+        <div class="tooltip">
+          <h4>${props.nom} (${props.code})</h4>
+          <div>Pharmacies : ${props.pharmacies||0}</div>
+          <div>CA : ${Intl.NumberFormat('fr-FR',{notation:'compact', maximumFractionDigits:1}).format(props.ca||0)}</div>
+          <div>Commercial : <span class="badge">${props.commercial || 'Non affecté'}</span></div>
+        </div>` : 'Survolez un département';
+    };
+    infoCtrl.addTo(map);
+
+    const legendCtrl = L.control({position: 'bottomright'});
+    legendCtrl.onAdd = function () { this._div = L.DomUtil.create('div', 'legend'); return this._div; };
+    legendCtrl.addTo(map);
+
+    function colorCA(v){
+      if (v < 20000) return '#ddd';
+      if (v < 100000) return '#d9f2d9';
+      if (v < 200000) return '#66cc66';
+      return '#1a781a';
+    }
+
+    const COVERAGE_COLORS = { full: '#2ca02c', partial: '#ff7f0e', none: '#d3d3d3' };
+    function coverageOf(d){
+      if (d.commercial) return 'full';
+      if ((d.ca||0) > 0) return 'partial';
+      return 'none';
+    }
+
+    let geoLayer;
+    fetch(GEOJSON_URL)
+      .then(r=>r.json())
+      .then(geojson => {
+        geoLayer = L.geoJSON(geojson, {
+          style: baseStyle,
+          onEachFeature: (feat, layer) => {
+            const d = enrichProps(feat);
+            layer.on({ mouseover: (e)=>highlight(e, d), mouseout: resetHighlight, click: (e)=>map.fitBounds(e.target.getBounds()) });
+            layer.bindTooltip(()=>tooltipHTML(d), { sticky: true, direction: 'top' });
+          }
+        }).addTo(map);
+        map.fitBounds(geoLayer.getBounds());
+        populateRepFilter();
+        recolor();
+      });
+
+    function baseStyle(){ return { color: '#666', weight: 1, fillOpacity: 0.85 }; }
+    function highlight(e, d){ e.target.setStyle({ weight: 2, color: '#000' }); infoCtrl.update(d); }
+    function resetHighlight(e){ geoLayer.resetStyle(e.target); infoCtrl.update(); }
+
+    function enrichProps(feat){
+      const code = feat.properties.code;
+      const rec = DATA[code] || { pharmacies: 0, ca: 0, commercial: null };
+      return { code, nom: feat.properties.nom, ...rec };
+    }
+
+    function tooltipHTML(d){
+      return `
+        <div class="tooltip">
+          <h4>${d.nom} (${d.code})</h4>
+          <div>Pharmacies : <strong>${d.pharmacies}</strong></div>
+          <div>CA : <strong>${Intl.NumberFormat('fr-FR').format(d.ca)}</strong></div>
+          <div>Commercial : <span class="badge">${d.commercial || 'Non affecté'}</span></div>
+        </div>`;
+    }
+
+    function recolor(){
+      const repSel = document.getElementById('repFilter').value;
+      const colorMode = document.getElementById('colorMode').value;
+
+      if (colorMode === 'coverage') {
+        geoLayer.eachLayer(layer => {
+          const d = enrichProps(layer.feature);
+          const passRep = repSel === 'ALL' ? true : (repSel === 'UNASSIGNED' ? !d.commercial : d.commercial === repSel);
+          const cov = coverageOf(d);
+          const fill = passRep ? (COVERAGE_COLORS[cov] || '#ccc') : '#ddd';
+          layer.setStyle({ fillColor: fill, fillOpacity: passRep ? 0.85 : 0.35 });
+        });
+        legendCtrl._div.innerHTML = `
+          <strong>Couverture</strong><br>
+          <div><span style="background:${COVERAGE_COLORS.full};display:inline-block;width:14px;height:14px;margin-right:4px"></span> Couvert</div>
+          <div><span style="background:${COVERAGE_COLORS.partial};display:inline-block;width:14px;height:14px;margin-right:4px"></span> Partiel</div>
+          <div><span style="background:${COVERAGE_COLORS.none};display:inline-block;width:14px;height:14px;margin-right:4px"></span> Non couvert</div>`;
+        return;
+      }
+
+      geoLayer.eachLayer(layer => {
+        const d = enrichProps(layer.feature);
+        const passRep = repSel === 'ALL' ? true : (repSel === 'UNASSIGNED' ? !d.commercial : d.commercial === repSel);
+        const fill = passRep ? colorCA(d.ca||0) : '#ddd';
+        layer.setStyle({ fillColor: fill, fillOpacity: passRep ? 0.85 : 0.35 });
+      });
+      legendCtrl._div.innerHTML = `
+        <strong>CA (€)</strong><br>
+        <div><span style="background:#d9f2d9;display:inline-block;width:14px;height:14px;margin-right:4px"></span> 20k – 100k</div>
+        <div><span style="background:#66cc66;display:inline-block;width:14px;height:14px;margin-right:4px"></span> 100k – 200k</div>
+        <div><span style="background:#1a781a;display:inline-block;width:14px;height:14px;margin-right:4px"></span> > 200k</div>
+      `;
+    }
+
+    function populateRepFilter(){
+      const reps = new Set();
+      Object.values(DATA).forEach(r => { if(r.commercial) reps.add(r.commercial); });
+      const sel = document.getElementById('repFilter');
+      sel.innerHTML = '<option value="ALL">Tous</option>' +
+                      '<option value="UNASSIGNED">Non affecté</option>' +
+                      Array.from(reps).sort().map(r=>`<option value="${r}">${r}</option>`).join('');
+    }
+
+    document.getElementById('colorMode').addEventListener('change', recolor);
+    document.getElementById('repFilter').addEventListener('change', recolor);
+    document.getElementById('search').addEventListener('keyup', (e)=>{
+      const q = e.target.value.trim().toLowerCase();
+      if(!q) return;
+      let found;
+      geoLayer.eachLayer(layer => {
+        const p = layer.feature.properties;
+        if(p.nom.toLowerCase().includes(q) || p.code.toLowerCase() === q){ found = layer; }
+      });
+      if(found){ map.fitBounds(found.getBounds(), { maxZoom: 8 }); found.fire('mouseover'); }
+    });
+  </script>
+</body>
+</html>
