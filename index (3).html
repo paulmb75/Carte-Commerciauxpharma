@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Carte interactive – CA & Commerciaux</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    html, body { height: 100%; margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: #fff; }
+    #app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+    header { padding: 12px 16px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #eee; flex-wrap: wrap; }
+    header .title { font-weight: 700; }
+    header .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    select, input[type="text"] { padding: 6px 8px; border: 1px solid #ccc; border-radius: 10px; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #f0f0f0; font-size: 12px; }
+    #map { height: 100%; width: 100%; background: #fff; }
+    .legend, .info { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,.08); }
+    .tooltip h4 { margin: 0 0 6px 0; }
+    .loading { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); background: #fff; padding: 8px 12px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="title">📍 Carte France – CA & Commerciaux</div>
+      <div class="controls">
+        <label>Mode couleur
+          <select id="colorMode">
+            <option value="ca" selected>CA (€)</option>
+            <option value="coverage">Commercial</option>
+          </select>
+        </label>
+        <label>Commercial
+          <select id="repFilter">
+            <option value="ALL">Tous</option>
+          </select>
+        </label>
+        <input id="search" type="text" placeholder="Rechercher un département… (nom ou code)" />
+      </div>
+    </header>
+    <div id="map"></div>
+    <div id="loading" class="loading" style="display:none">Chargement de la carte…</div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <script>
+    // === Données originales (CA + commerciaux) — issues de ton premier message ===
+    const OLD_DATA = {"13":{"pharmacies":726,"ca":2063658.0,"commercial":"Bernadette Boiron, Laure Bonnel, Laurent Botti, Nathalie Bouchard, S. Gambirasio, Val Barnes, Vincent Guinet"},"83":{"pharmacies":310,"ca":1403294.0,"commercial":"Geraldine Seliga, Laurent Botti, Nathalie Bouchard, S. Gambirasio"},"06":{"pharmacies":312,"ca":695500.0,"commercial":"Geraldine Seliga"},"84":{"pharmacies":180,"ca":583439.0,"commercial":"Laure Bonnel, S. Gambirasio, Vincent Guinet"},"30":{"pharmacies":210,"ca":539414.0,"commercial":"Bernadette Boiron, Vincent Guinet"},"34":{"pharmacies":310,"ca":512241.0,"commercial":"Bernadette Boiron, Caroline Jofre, Vincent Guinet"},"38":{"pharmacies":388,"ca":413734.0,"commercial":"Charlotte Degournay, Olivier Seon"},"11":{"pharmacies":130,"ca":300489.0,"commercial":"Caroline Jofre"},"66":{"pharmacies":140,"ca":287415.0,"commercial":"Caroline Jofre"},"31":{"pharmacies":320,"ca":286458.0,"commercial":"Agnes Tafforin"},"68":{"pharmacies":250,"ca":216547.0,"commercial":"Josee Muth"},"77":{"pharmacies":310,"ca":184363.0,"commercial":"Christophe Marthoud"},"69":{"pharmacies":578,"ca":178094.0,"commercial":"Odile Lenot, Olivier Seon"},"20":{"pharmacies":137,"ca":166540.0,"commercial":"Laure Bonnel, Nathalie Bouchard"},"57":{"pharmacies":300,"ca":160911.0,"commercial":"Sophie Hocquard"},"63":{"pharmacies":261,"ca":153186.0,"commercial":null},"05":{"pharmacies":61,"ca":152062.0,"commercial":"Laurent Botti"},"74":{"pharmacies":190,"ca":148715.0,"commercial":"Charlotte Degournay"},"71":{"pharmacies":223,"ca":140515.0,"commercial":"Odile Lenot"},"67":{"pharmacies":310,"ca":136907.0,"commercial":"Josee Muth"},"04":{"pharmacies":59,"ca":127063.0,"commercial":"Geraldine Seliga, Laure Bonnel, Laurent Botti, S. Gambirasio, Vincent Guinet"},"62":{"pharmacies":420,"ca":121003.0,"commercial":"Anne Decroix"},"26":{"pharmacies":162,"ca":105301.0,"commercial":"Olivier Seon, Vincent Guinet"},"01":{"pharmacies":162,"ca":103490.0,"commercial":"Charlotte Degournay, Odile Lenot"},"42":{"pharmacies":270,"ca":102573.0,"commercial":"Odile Lenot"},"73":{"pharmacies":140,"ca":102324.0,"commercial":"Charlotte Degournay"},"59":{"pharmacies":620,"ca":101605.0,"commercial":"Anne Decroix"},"07":{"pharmacies":104,"ca":87876.0,"commercial":"Olivier Seon, S. Gambirasio, Vincent Guinet"},"25":{"pharmacies":180,"ca":67652.0,"commercial":"Josee Muth"},"09":{"pharmacies":70,"ca":67339.0,"commercial":"Agnes Tafforin"},"93":{"pharmacies":230,"ca":63071.0,"commercial":"Christophe Marthoud"},"81":{"pharmacies":130,"ca":61722.0,"commercial":"Agnes Tafforin"},"54":{"pharmacies":230,"ca":53401.0,"commercial":"Sophie Hocquard"},"15":{"pharmacies":63,"ca":53077.0,"commercial":null},"94":{"pharmacies":240,"ca":49644.0,"commercial":"Christophe Marthoud"},"48":{"pharmacies":50,"ca":42982.0,"commercial":"Vincent Guinet"},"95":{"pharmacies":314,"ca":40982.0,"commercial":"Christophe Marthoud"},"12":{"pharmacies":115,"ca":35902.0,"commercial":"Vincent Guinet"},"90":{"pharmacies":50,"ca":31156.0,"commercial":"Josee Muth"},"98":{"pharmacies":700,"ca":29026.0,"commercial":"Geraldine Seliga"},"55":{"pharmacies":80,"ca":27990.0,"commercial":"Sophie Hocquard"},"51":{"pharmacies":210,"ca":23477.0,"commercial":"Sophie Hocquard"},"43":{"pharmacies":87,"ca":22329.0,"commercial":null},"14":{"pharmacies":210,"ca":20394.0,"commercial":null},"08":{"pharmacies":105,"ca":16625.0,"commercial":"Sophie Hocquard"},"03":{"pharmacies":123,"ca":16541.0,"commercial":null},"82":{"pharmacies":100,"ca":13410.0,"commercial":"Agnes Tafforin"},"32":{"pharmacies":90,"ca":10380.0,"commercial":"Agnes Tafforin"},"75":{"pharmacies":858,"ca":9061.0,"commercial":"Christophe Marthoud, S. Gambirasio"},"80":{"pharmacies":180,"ca":4648.0,"commercial":null},"19":{"pharmacies":120,"ca":4209.0,"commercial":null},"92":{"pharmacies":290,"ca":3020.0,"commercial":"Christophe Marthoud"},"46":{"pharmacies":90,"ca":2947.0,"commercial":null},"64":{"pharmacies":236,"ca":2257.0,"commercial":"Geraldine Seliga, S. Gambirasio"},"97":{"pharmacies":0,"ca":1927.0,"commercial":"S. Gambirasio"},"52":{"pharmacies":90,"ca":1829.0,"commercial":"S. Gambirasio"},"X":{"pharmacies":0,"ca":1719.0,"commercial":null},"91":{"pharmacies":270,"ca":1381.0,"commercial":"Christophe Marthoud"},"60":{"pharmacies":250,"ca":1332.0,"commercial":"Christophe Marthoud"},"02":{"pharmacies":185,"ca":1309.0,"commercial":"S. Gambirasio"},"49":{"pharmacies":230,"ca":964.0,"commercial":null},"17":{"pharmacies":220,"ca":677.0,"commercial":"Caroline Jofre, S. Gambirasio"},"44":{"pharmacies":310,"ca":549.0,"commercial":"S. Gambirasio"},"33":{"pharmacies":420,"ca":221.0,"commercial":"S. Gambirasio"},"78":{"pharmacies":290,"ca":149.0,"commercial":"Christophe Marthoud, S. Gambirasio"}};
+
+    // === Nouveau comptage pharmacies — fourni par toi ===
+    const NEW_PHARM = {"01":159,"02":171,"03":134,"04":59,"05":55,"06":439,"07":97,"08":105,"09":48,"10":89,"11":137,"12":112,"13":745,"14":215,"15":66,"16":124,"17":222,"18":104,"19":97,"20":138,"21":168,"22":196,"23":56,"24":141,"25":183,"26":154,"27":146,"28":107,"29":298,"30":249,"31":409,"32":64,"33":528,"34":391,"35":300,"36":86,"37":197,"38":379,"39":91,"40":133,"41":103,"42":228,"43":82,"44":400,"45":186,"46":64,"47":123,"48":34,"49":240,"50":138,"51":184,"52":60,"53":84,"54":262,"55":58,"56":239,"57":259,"58":80,"59":896,"60":217,"61":93,"62":502,"63":240,"64":247,"65":93,"66":171,"67":281,"68":192,"69":558,"70":82,"71":191,"72":160,"73":148,"74":226,"75":883,"76":358,"77":356,"78":380,"79":124,"80":191,"81":126,"82":78,"83":372,"84":203,"85":212,"86":145,"87":152,"88":131,"89":105,"90":51,"91":347,"92":463,"93":402,"94":395,"95":322};
+
+    // Construire DATA = OLD_DATA + override pharmacies
+    const DATA = (() => {
+      const out = {};
+      Object.keys(OLD_DATA).forEach(k => out[k] = {...OLD_DATA[k]});
+      Object.entries(NEW_PHARM).forEach(([k, v]) => {
+        if (!out[k]) out[k] = { pharmacies: 0, ca: 0, commercial: null };
+        out[k].pharmacies = v;
+      });
+      return out;
+    })();
+
+    const GEOJSON_URL = "https://france-geojson.gregoiredavid.fr/repo/departements.geojson";
+
+    // Carte OSM + bornes France
+    const map = L.map('map', { minZoom: 5, maxZoom: 10 });
+    const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; contributeurs <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
+    }).addTo(map);
+
+    const infoCtrl = L.control({position: 'topright'});
+    infoCtrl.onAdd = function () { this._div = L.DomUtil.create('div', 'info'); this.update(); return this._div; };
+    infoCtrl.update = function (props) {
+      this._div.innerHTML = props ? `
+        <div class="tooltip">
+          <h4>${props.nom} (${props.code})</h4>
+          <div>Pharmacies : ${props.pharmacies||0}</div>
+          <div>CA : ${Intl.NumberFormat('fr-FR',{notation:'compact', maximumFractionDigits:1}).format(props.ca||0)}</div>
+          <div>Commercial : <span class="badge">${props.commercial || 'Non affecté'}</span></div>
+        </div>` : 'Survolez un département';
+    };
+    infoCtrl.addTo(map);
+
+    const legendCtrl = L.control({position: 'bottomright'});
+    legendCtrl.onAdd = function () { this._div = L.DomUtil.create('div', 'legend'); return this._div; };
+    legendCtrl.addTo(map);
+
+    function colorCA(v){
+      if (v < 20000) return '#ddd';
+      if (v < 100000) return '#d9f2d9';
+      if (v < 200000) return '#66cc66';
+      return '#1a781a';
+    }
+
+    const COVERAGE_COLORS = { full: '#2ca02c', partial: '#ff7f0e', none: '#d3d3d3' };
+    function coverageOf(d){
+      if (d.commercial) return 'full';
+      if ((d.ca||0) > 0) return 'partial';
+      return 'none';
+    }
+
+    function enrichProps(feat){
+      let code = feat.properties.code;
+      let rec = DATA[code];
+      if (!rec && (code === '2A' || code === '2B') && DATA['20']) {
+        rec = DATA['20'];
+      }
+      if (!rec) rec = { pharmacies: 0, ca: 0, commercial: null };
+      return { code, nom: feat.properties.nom, ...rec };
+    }
+
+    let geoLayer;
+    const loadingEl = document.getElementById('loading');
+    loadingEl.style.display = 'block';
+    fetch(GEOJSON_URL)
+      .then(r=>r.json())
+      .then(geojson => {
+        geoLayer = L.geoJSON(geojson, {
+          style: baseStyle,
+          onEachFeature: (feat, layer) => {
+            const d = enrichProps(feat);
+            layer.on({ mouseover: (e)=>highlight(e, d), mouseout: resetHighlight, click: (e)=>map.fitBounds(e.target.getBounds(), { maxZoom: 8 }) });
+            layer.bindTooltip(()=>tooltipHTML(d), { sticky: true, direction: 'top' });
+          }
+        }).addTo(map);
+
+        const b = geoLayer.getBounds();
+        map.fitBounds(b);
+        map.setMaxBounds(b.pad(0.02));
+
+        populateRepFilter();
+        recolor();
+      })
+      .catch(err => {
+        alert('Erreur de chargement GeoJSON: '+err);
+      })
+      .finally(()=>{ loadingEl.style.display = 'none'; });
+
+    function baseStyle(){ return { color: '#666', weight: 1, fillOpacity: 0.9 }; }
+    function highlight(e, d){ e.target.setStyle({ weight: 2, color: '#000' }); infoCtrl.update(d); }
+    function resetHighlight(e){ geoLayer.resetStyle(e.target); infoCtrl.update(); }
+
+    function tooltipHTML(d){
+      return `
+        <div class="tooltip">
+          <h4>${d.nom} (${d.code})</h4>
+          <div>Pharmacies : <strong>${d.pharmacies}</strong></div>
+          <div>CA : <strong>${Intl.NumberFormat('fr-FR').format(d.ca)}</strong></div>
+          <div>Commercial : <span class="badge">${d.commercial || 'Non affecté'}</span></div>
+        </div>`;
+    }
+
+    function recolor(){
+      const repSel = document.getElementById('repFilter').value;
+      const colorMode = document.getElementById('colorMode').value;
+
+      if (colorMode === 'coverage') {
+        geoLayer.eachLayer(layer => {
+          const d = enrichProps(layer.feature);
+          const passRep = repSel === 'ALL' ? true : (repSel === 'UNASSIGNED' ? !d.commercial : d.commercial === repSel);
+          const cov = coverageOf(d);
+          const fill = passRep ? (COVERAGE_COLORS[cov] || '#ccc') : '#ddd';
+          layer.setStyle({ fillColor: fill, fillOpacity: passRep ? 0.9 : 0.35 });
+        });
+        legendCtrl._div.innerHTML = `
+          <strong>Couverture</strong><br>
+          <div><span style="background:${COVERAGE_COLORS.full};display:inline-block;width:14px;height:14px;margin-right:4px"></span> Couvert</div>
+          <div><span style="background:${COVERAGE_COLORS.partial};display:inline-block;width:14px;height:14px;margin-right:4px"></span> Partiel</div>
+          <div><span style="background:${COVERAGE_COLORS.none};display:inline-block;width:14px;height:14px;margin-right:4px"></span> Non couvert</div>`;
+        return;
+      }
+
+      geoLayer.eachLayer(layer => {
+        const d = enrichProps(layer.feature);
+        const passRep = repSel === 'ALL' ? true : (repSel === 'UNASSIGNED' ? !d.commercial : d.commercial === repSel);
+        const fill = passRep ? colorCA(d.ca||0) : '#ddd';
+        layer.setStyle({ fillColor: fill, fillOpacity: passRep ? 0.9 : 0.35 });
+      });
+      legendCtrl._div.innerHTML = `
+        <strong>CA (€)</strong><br>
+        <div><span style="background:#ddd;display:inline-block;width:14px;height:14px;margin-right:4px"></span> &lt; 20k (non coloré)</div>
+        <div><span style="background:#d9f2d9;display:inline-block;width:14px;height:14px;margin-right:4px"></span> 20k – 100k</div>
+        <div><span style="background:#66cc66;display:inline-block;width:14px;height:14px;margin-right:4px"></span> 100k – 200k</div>
+        <div><span style="background:#1a781a;display:inline-block;width:14px;height:14px;margin-right:4px"></span> &gt; 200k</div>
+      `;
+    }
+
+    function populateRepFilter(){
+      const reps = new Set();
+      Object.values(DATA).forEach(r => { if(r.commercial) reps.add(r.commercial); });
+      const sel = document.getElementById('repFilter');
+      sel.innerHTML = '<option value="ALL">Tous</option>' +
+                      '<option value="UNASSIGNED">Non affecté</option>' +
+                      Array.from(reps).sort().map(r=>`<option value="${r}">${r}</option>`).join('');
+    }
+
+    document.getElementById('colorMode').addEventListener('change', recolor);
+    document.getElementById('repFilter').addEventListener('change', recolor);
+    document.getElementById('search').addEventListener('keyup', (e)=>{
+      const q = e.target.value.trim().toLowerCase();
+      if(!q) return;
+      let found;
+      geoLayer.eachLayer(layer => {
+        const p = layer.feature.properties;
+        if(p.nom.toLowerCase().includes(q) || p.code.toLowerCase() === q){ found = layer; }
+      });
+      if(found){ map.fitBounds(found.getBounds(), { maxZoom: 8 }); found.fire('mouseover'); }
+    });
+  </script>
+</body>
+</html>
